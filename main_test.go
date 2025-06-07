@@ -15,18 +15,17 @@ import (
 )
 
 type testCase struct {
-	name           string
-	repository     string
-	tag            string
-	useTLS         bool
-	tlsConfig      *tls.Config
-	envVars        []string
-	dialOptions    []ftp.DialOption
-	username       string
-	password       string
-	pasvMinPort    int
-	pasvMaxPort    int
-	useHostNetwork bool
+	name        string
+	repository  string
+	tag         string
+	useTLS      bool
+	tlsConfig   *tls.Config
+	envVars     []string
+	dialOptions []ftp.DialOption
+	username    string
+	password    string
+	pasvMinPort int
+	pasvMaxPort int
 }
 
 func TestFTPServer(t *testing.T) {
@@ -54,14 +53,13 @@ func TestFTPServer(t *testing.T) {
 				ftp.DialWithTimeout(5 * time.Second),
 				ftp.DialWithDisabledEPSV(true),
 			},
-			username:       "ftps",
-			password:       "pass",
-			pasvMinPort:    60000,
-			pasvMaxPort:    60010,
-			useHostNetwork: true,
+			username:    "ftps",
+			password:    "pass",
+			pasvMinPort: 60000,
+			pasvMaxPort: 60010,
 		},
 		{
-			name:       "FTP (plain with host network)",
+			name:       "FTP (plain)",
 			repository: "garethflowers/ftp-server",
 			tag:        "latest",
 			useTLS:     false,
@@ -70,16 +68,16 @@ func TestFTPServer(t *testing.T) {
 				"FTP_PASS=pass",
 				"UID=1000",
 				"GID=1000",
+				"PUBLIC_IP=127.0.0.1",
 			},
 			dialOptions: []ftp.DialOption{
 				ftp.DialWithTimeout(5 * time.Second),
-				ftp.DialWithDisabledEPSV(true), // EPSVを無効化してPASVを使用
+				ftp.DialWithDisabledEPSV(true),
 			},
-			username:       "ftps",
-			password:       "pass",
-			pasvMinPort:    0,
-			pasvMaxPort:    0,
-			useHostNetwork: true, // ホストネットワークモードを使用（パッシブポートの動的割り当てに対応）
+			username:    "ftps",
+			password:    "pass",
+			pasvMinPort: 40000,
+			pasvMaxPort: 40009,
 		},
 	}
 
@@ -104,8 +102,8 @@ func TestFTPServer(t *testing.T) {
 				{HostIP: "0.0.0.0", HostPort: ""}, // Let Docker assign a free port
 			}
 
-			// For passive mode, expose and bind the port range (only needed for non-host network mode)
-			if !tc.useHostNetwork && tc.pasvMinPort > 0 && tc.pasvMaxPort > 0 {
+			// For passive mode, expose and bind the port range
+			if tc.pasvMinPort > 0 && tc.pasvMaxPort > 0 {
 				for port := tc.pasvMinPort; port <= tc.pasvMaxPort; port++ {
 					portStr := fmt.Sprintf("%d/tcp", port)
 					exposedPorts = append(exposedPorts, portStr)
@@ -129,10 +127,6 @@ func TestFTPServer(t *testing.T) {
 					Name: "no",
 				}
 				config.PortBindings = portBindings
-				// Use host network mode if specified
-				if tc.useHostNetwork {
-					config.NetworkMode = "host"
-				}
 			})
 			if err != nil {
 				t.Fatalf("Could not start resource: %v", err)
@@ -144,12 +138,7 @@ func TestFTPServer(t *testing.T) {
 				}
 			}()
 
-			var ftpPort string
-			if tc.useHostNetwork {
-				ftpPort = "21"
-			} else {
-				ftpPort = resource.GetPort("21/tcp")
-			}
+			ftpPort := resource.GetPort("21/tcp")
 			t.Logf("FTP server %s started on port %s", tc.name, ftpPort)
 
 			// Give the container time to fully initialize
