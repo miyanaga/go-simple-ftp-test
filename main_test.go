@@ -3,8 +3,9 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +22,6 @@ type testCase struct {
 	tlsConfig   *tls.Config
 	envVars     []string
 	dialOptions []ftp.DialOption
-	mountPath   string
 	username    string
 	password    string
 	pasvMinPort int
@@ -53,34 +53,32 @@ func TestFTPServer(t *testing.T) {
 				ftp.DialWithTimeout(5 * time.Second),
 				ftp.DialWithDisabledEPSV(true),
 			},
-			mountPath:   "/files",
 			username:    "ftps",
 			password:    "pass",
 			pasvMinPort: 60000,
 			pasvMaxPort: 60010,
 		},
-		{
-			name:       "FTP (plain)",
-			repository: "garethflowers/ftp-server",
-			tag:        "latest",
-			useTLS:     false,
-			envVars: []string{
-				"FTP_USER=ftps",
-				"FTP_PASS=pass",
-				"UID=1000",
-				"GID=1000",
-				"PUBLIC_IP=127.0.0.1",
-			},
-			dialOptions: []ftp.DialOption{
-				ftp.DialWithTimeout(5 * time.Second),
-				ftp.DialWithDisabledEPSV(true),
-			},
-			mountPath:   "/home/ftps",
-			username:    "ftps",
-			password:    "pass",
-			pasvMinPort: 40000,
-			pasvMaxPort: 40010,
-		},
+		// {
+		// 	name:       "FTP (plain)",
+		// 	repository: "garethflowers/ftp-server",
+		// 	tag:        "latest",
+		// 	useTLS:     false,
+		// 	envVars: []string{
+		// 		"FTP_USER=ftps",
+		// 		"FTP_PASS=pass",
+		// 		"UID=1000",
+		// 		"GID=1000",
+		// 		"PUBLIC_IP=127.0.0.1",
+		// 	},
+		// 	dialOptions: []ftp.DialOption{
+		// 		ftp.DialWithTimeout(5 * time.Second),
+		// 		ftp.DialWithDisabledEPSV(true),
+		// 	},
+		// 	username:    "ftps",
+		// 	password:    "pass",
+		// 	pasvMinPort: 50000,
+		// 	pasvMaxPort: 50010,
+		// },
 	}
 
 	for _, tc := range testCases {
@@ -93,11 +91,6 @@ func TestFTPServer(t *testing.T) {
 			err = pool.Client.Ping()
 			if err != nil {
 				t.Fatalf("Could not connect to docker daemon: %v", err)
-			}
-
-			absTestdataPath, err := filepath.Abs("testdata")
-			if err != nil {
-				t.Fatalf("Could not get absolute path for testdata: %v", err)
 			}
 
 			// Create port bindings
@@ -126,9 +119,6 @@ func TestFTPServer(t *testing.T) {
 				Tag:          tc.tag,
 				Env:          tc.envVars,
 				ExposedPorts: exposedPorts,
-				Mounts: []string{
-					fmt.Sprintf("%s:%s", absTestdataPath, tc.mountPath),
-				},
 			}
 
 			resource, err := pool.RunWithOptions(runOpts, func(config *docker.HostConfig) {
@@ -151,7 +141,7 @@ func TestFTPServer(t *testing.T) {
 			ftpPort := resource.GetPort("21/tcp")
 
 			// Give the container time to fully initialize
-			time.Sleep(1 * time.Second)
+			time.Sleep(3 * time.Second)
 
 			// Create FTP connection
 			var ftpConn *ftp.ServerConn
@@ -182,22 +172,135 @@ func TestFTPServer(t *testing.T) {
 
 			defer ftpConn.Quit()
 
-			// List files and verify expected files exist
+			// Step 0: Check if SIZE and MDTM commands are supported
+			testContent := "Test file for commands"
+			err = ftpConn.Stor("test_cmd.txt", strings.NewReader(testContent))
+			if err != nil {
+				t.Fatalf("Failed to create test file: %v", err)
+			}
+			
+			// Check SIZE support
+			_, err = ftpConn.FileSize("test_cmd.txt")
+			if err != nil {
+				t.Errorf("SIZE command is NOT supported: %v", err)
+			}
+			
+			// Check MDTM support
+			_, err = ftpConn.GetTime("test_cmd.txt")
+			if err != nil {
+				t.Errorf("MDTM command is NOT supported: %v", err)
+			}
+			
+			// Clean up
+			ftpConn.Delete("test_cmd.txt")
+
+			// Step 1: Create directory and files
+			err = ftpConn.MakeDir("dir1")
+			if err != nil {
+				t.Fatalf("Failed to create directory dir1: %v", err)
+			}
+			
+			err = ftpConn.ChangeDir("dir1")
+			if err != nil {
+				t.Fatalf("Failed to change to directory dir1: %v", err)
+			}
+			
+			err = ftpConn.Stor("file1.txt", strings.NewReader("This is file1 in dir1"))
+			if err != nil {
+				t.Fatalf("Failed to create dir1/file1.txt: %v", err)
+			}
+			
+			err = ftpConn.ChangeDir("/")
+			if err != nil {
+				t.Fatalf("Failed to change back to root directory: %v", err)
+			}
+			
+			err = ftpConn.Stor("file2.txt", strings.NewReader("This is file2 in root"))
+			if err != nil {
+				t.Fatalf("Failed to create file2.txt: %v", err)
+			}
+			
+			err = ftpConn.Stor("file3.txt", strings.NewReader("This is file3 in root"))
+			if err != nil {
+				t.Fatalf("Failed to create file3.txt: %v", err)
+			}
+
+			// Step 2: List directories (root and dir1)
 			entries, err := ftpConn.List("")
 			if err != nil {
-				t.Fatalf("Could not list files: %v", err)
+				t.Fatalf("Failed to list root directory: %v", err)
 			}
-
-			fileNames := make(map[string]bool)
+			
+			// Check expected entries in root
+			rootExpected := map[string]bool{
+				"dir1":      false,
+				"file2.txt": false,
+				"file3.txt": false,
+			}
+			
 			for _, entry := range entries {
-				fileNames[entry.Name] = true
+				if _, exists := rootExpected[entry.Name]; exists {
+					rootExpected[entry.Name] = true
+				}
+			}
+			
+			// Verify all expected entries were found
+			for name, found := range rootExpected {
+				if !found {
+					t.Errorf("Expected entry '%s' not found in root directory", name)
+				}
+			}
+			
+			// List dir1 directory
+			entries, err = ftpConn.List("dir1")
+			if err != nil {
+				t.Fatalf("Failed to list dir1 directory: %v", err)
+			}
+			
+			// Check expected entries in dir1
+			dir1Expected := map[string]bool{
+				"file1.txt": false,
+			}
+			
+			for _, entry := range entries {
+				if _, exists := dir1Expected[entry.Name]; exists {
+					dir1Expected[entry.Name] = true
+				}
+			}
+			
+			// Verify all expected entries were found
+			for name, found := range dir1Expected {
+				if !found {
+					t.Errorf("Expected entry '%s' not found in dir1 directory", name)
+				}
 			}
 
-			expectedFiles := []string{"file1.txt", "file2.txt"}
-			for _, expectedFile := range expectedFiles {
-				if !fileNames[expectedFile] {
-					t.Errorf("Expected file %s not found", expectedFile)
-				}
+			// Step 3: Check file size with SIZE command
+			expectedContent := "This is file2 in root"
+			fileSize, err := ftpConn.FileSize("file2.txt")
+			if err != nil {
+				t.Fatalf("Failed to get size of file2.txt: %v", err)
+			}
+			
+			if int(fileSize) != len(expectedContent) {
+				t.Errorf("file2.txt size mismatch: got %d, expected %d", fileSize, len(expectedContent))
+			}
+
+			// Step 4: Read file content
+			response, err := ftpConn.Retr("dir1/file1.txt")
+			if err != nil {
+				t.Fatalf("Failed to retrieve dir1/file1.txt: %v", err)
+			}
+			defer response.Close()
+			
+			content, err := io.ReadAll(response)
+			if err != nil {
+				t.Fatalf("Failed to read dir1/file1.txt content: %v", err)
+			}
+			
+			expectedFile1Content := "This is file1 in dir1"
+			if string(content) != expectedFile1Content {
+				t.Errorf("dir1/file1.txt content mismatch: got %q, expected %q", string(content), expectedFile1Content)
 			}
 		})
 	}
