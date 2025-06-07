@@ -32,28 +32,6 @@ func TestFTPServer(t *testing.T) {
 	// Table-driven test cases
 	testCases := []testCase{
 		{
-			name:       "FTP (plain)",
-			repository: "fauria/vsftpd",
-			tag:        "latest",
-			useTLS:     false,
-			envVars: []string{
-				"FTP_USER=testuser",
-				"FTP_PASS=testpass",
-				"PASV_ADDRESS=127.0.0.1",
-				"PASV_MIN_PORT=21100",
-				"PASV_MAX_PORT=21110",
-			},
-			dialOptions: []ftp.DialOption{
-				ftp.DialWithTimeout(5 * time.Second),
-				ftp.DialWithDisabledEPSV(true),
-			},
-			mountPath:   "/home/vsftpd/testuser",
-			username:    "testuser",
-			password:    "testpass",
-			pasvMinPort: 21100,
-			pasvMaxPort: 21110,
-		},
-		{
 			name:       "FTPS (with TLS)",
 			repository: "bfren/ftps",
 			tag:        "latest",
@@ -82,7 +60,7 @@ func TestFTPServer(t *testing.T) {
 			pasvMaxPort: 60010,
 		},
 		{
-			name:       "FTP (garethflowers)",
+			name:       "FTP (plain)",
 			repository: "garethflowers/ftp-server",
 			tag:        "latest",
 			useTLS:     false,
