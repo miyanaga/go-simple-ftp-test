@@ -18,4 +18,29 @@ Go言語による次のテストを行うプログラムです。
 ```bash
 go test -v
 ```
+
+## CI/CD
+
+このプロジェクトはGitHub Actionsを使用した継続的インテグレーションを実装しています。
+
+### 自動テスト
+- **トリガー**: 
+  - 任意のブランチへのプッシュ
+  - 任意のブランチへのプルリクエスト
+- **実行環境**: Ubuntu latest（Docker事前インストール済み）
+- **Goバージョン**: 1.21
+- **実行内容**:
+  1. コードのチェックアウト
+  2. Go環境のセットアップ
+  3. Dockerの可用性確認
+  4. 依存関係のダウンロード
+  5. テストの実行（詳細出力付き）
+
+### Docker環境
+- GitHub ActionsのUbuntuランナーにはDockerが事前インストールされています
+- テスト実行時に必要なDockerイメージは自動的にプルされます：
+  - `bfren/ftps:latest`（FTPSテスト用）
+  - `garethflowers/ftp-server:latest`（通常FTPテスト用）
+
+ワークフローファイル: `.github/workflows/test.yml`
   

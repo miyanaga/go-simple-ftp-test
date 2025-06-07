@@ -66,3 +66,33 @@ Each test case contains:
 The test automatically binds:
 - FTP control port (21) to a random available port
 - Passive mode ports to the specified range (fixed ports)
+
+## CI/CD
+
+This project uses GitHub Actions for continuous integration:
+
+### Workflow: `.github/workflows/test.yml`
+- **Triggers**: 
+  - Push to any branch
+  - Pull requests to any branch
+- **Environment**: Ubuntu latest (includes Docker pre-installed)
+- **Go Version**: 1.21
+- **Actions**:
+  1. Checkout code
+  2. Set up Go environment
+  3. Verify Docker is available (`docker --version` and `docker info`)
+  4. Download dependencies (`go mod download`)
+  5. Run tests with verbose output (`go test -v`)
+     - Sets `DOCKER_HOST` environment variable to ensure Docker socket access
+
+The workflow ensures all tests pass before merging changes and provides immediate feedback on code quality.
+
+### Docker Requirements
+- GitHub Actions Ubuntu runners include Docker pre-installed
+- The workflow verifies Docker availability before running tests
+- Tests will automatically pull required Docker images:
+  - `bfren/ftps:latest` (for FTPS testing)
+  - `garethflowers/ftp-server:latest` (for plain FTP testing)
+- Required port ranges must be available:
+  - 60000-60010 (FTPS passive mode)
+  - 40000-40009 (FTP passive mode)
